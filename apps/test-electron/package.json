@@ -1,0 +1,26 @@
+{
+	"name": "@demo/test-electron",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"build": "npm run -w @whisperflow/nanostore-ipc-bridge build && tsup --config tsup.electron.config.ts && vite build",
+		"dev": "npm run -w @whisperflow/nanostore-ipc-bridge build && concurrently -k \"vite\" \"tsup --config tsup.electron.config.ts --watch\" \"wait-on http://localhost:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron dist-electron/main.js\""
+	},
+	"dependencies": {
+		"@whisperflow/nanostore-ipc-bridge": "*",
+		"nanostores": "^0.11.3",
+		"@nanostores/react": "^0.8.3",
+		"react": "^18.3.1",
+		"react-dom": "^18.3.1"
+	},
+	"devDependencies": {
+		"electron": "^31.4.0",
+		"typescript": "^5.6.3",
+		"tsup": "^8.3.0",
+		"vite": "^6.0.0",
+		"@vitejs/plugin-react": "^4.3.3",
+		"concurrently": "^9.0.1",
+		"wait-on": "^8.0.1"
+	}
+}

@@ -1,0 +1,49 @@
+{
+	"name": "@whisperflow/nanostore-ipc-bridge",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Zero-config NanoStores sync across Electron windows via IPC (syncedAtom).",
+	"keywords": [
+		"electron",
+		"nanostores",
+		"ipc",
+		"state",
+		"sync"
+	],
+	"license": "MIT",
+	"main": "./dist/index.js",
+	"module": "./dist/index.mjs",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.mjs",
+			"require": "./dist/index.js"
+		},
+		"./main": {
+			"types": "./dist/main/index.d.ts",
+			"import": "./dist/main/index.mjs",
+			"require": "./dist/main/index.js"
+		},
+		"./preload": {
+			"types": "./dist/preload/index.d.ts",
+			"import": "./dist/preload/index.mjs",
+			"require": "./dist/preload/index.js"
+		},
+		"./universal": {
+			"types": "./dist/universal/index.d.ts",
+			"import": "./dist/universal/index.mjs",
+			"require": "./dist/universal/index.js"
+		}
+	},
+	"peerDependencies": {
+		"nanostores": "^0.11.0"
+	},
+	"devDependencies": {
+		"typescript": "^5.6.3",
+		"tsup": "^8.3.0"
+	},
+	"scripts": {
+		"build": "tsup"
+	}
+}

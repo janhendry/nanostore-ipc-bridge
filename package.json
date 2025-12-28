@@ -1,0 +1,12 @@
+{
+  "name": "whisperflow-nanostore-ipc-bridge-demo",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run -ws build",
+    "dev": "npm run -w @demo/test-electron dev"
+  }
+}
