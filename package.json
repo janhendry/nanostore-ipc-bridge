@@ -1,5 +1,5 @@
 {
-	"name": "nanostore-ipc-bridge-demo",
+	"name": "nanostore-ipc-bridge-workspace",
 	"private": true,
 	"workspaces": [
 		"packages/*",

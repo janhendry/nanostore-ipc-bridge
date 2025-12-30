@@ -1,5 +1,9 @@
 # @janhendry/nanostore-ipc-bridge
 
+[![npm version](https://img.shields.io/npm/v/@janhendry/nanostore-ipc-bridge.svg)](https://www.npmjs.com/package/@janhendry/nanostore-ipc-bridge)
+[![license](https://img.shields.io/npm/l/@janhendry/nanostore-ipc-bridge.svg)](https://github.com/janhendry/nanostore-ipc-bridge/blob/main/LICENSE)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/@janhendry/nanostore-ipc-bridge)](https://bundlephobia.com/package/@janhendry/nanostore-ipc-bridge)
+
 **Zero-config Electron IPC bridge for NanoStores** – Synchronize nanostores between main and renderer processes with full TypeScript support.
 
 ## Features
@@ -18,6 +22,8 @@
 ```bash
 npm install @janhendry/nanostore-ipc-bridge nanostores
 ```
+
+📦 **[View on npm](https://www.npmjs.com/package/@janhendry/nanostore-ipc-bridge)** | 💬 **[Report Issues](https://github.com/janhendry/nanostore-ipc-bridge/issues)** | 📖 **[Full Documentation](https://github.com/janhendry/nanostore-ipc-bridge)**
 
 ## Quick Start
 

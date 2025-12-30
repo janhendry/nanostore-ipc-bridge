@@ -10,6 +10,13 @@
 		"sync"
 	],
 	"license": "MIT",
+	"author": "jan-hendry",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/janhendry/nanostore-ipc-bridge.git"
+	},
+	"homepage": "https://github.com/janhendry/nanostore-ipc-bridge#readme",
+	"bugs": "https://github.com/janhendry/nanostore-ipc-bridge/issues",
 	"main": "./dist/index.js",
 	"module": "./dist/index.mjs",
 	"types": "./dist/index.d.ts",
@@ -40,6 +47,15 @@
 			"require": "./dist/universal/index.js"
 		}
 	},
+	"files": [
+		"dist"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"engines": {
+		"node": ">=16.0.0"
+	},
 	"peerDependencies": {
 		"nanostores": "^0.11.0"
 	},
@@ -48,6 +64,7 @@
 		"tsup": "^8.3.0"
 	},
 	"scripts": {
-		"build": "tsup"
+		"build": "tsup",
+		"prepublishOnly": "npm run build"
 	}
 }
