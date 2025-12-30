@@ -1,6 +1,6 @@
 {
 	"name": "@janhendry/nanostore-ipc-bridge",
-	"version": "0.1.0-alpha.1",
+	"version": "0.1.0-alpha.2",
 	"description": "Zero-config NanoStores sync across Electron windows via IPC (syncedAtom).",
 	"keywords": [
 		"electron",
