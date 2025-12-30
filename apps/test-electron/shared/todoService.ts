@@ -1,4 +1,4 @@
-import { defineService } from "@whisperflow/nanostore-ipc-bridge/services";
+import { defineService } from "@janhendry/nanostore-ipc-bridge/services";
 
 // In-memory todo storage
 const todos: Array<{ id: number; text: string; completed: boolean }> = [];

@@ -1,157 +1,176 @@
-# Developer README
+# Development Guide
 
-This repository is a **workspace** containing:
+> **For library usage documentation, see [README.md](./README.md)**
 
-- `packages/nanostore-ipc-bridge` — the library (TypeScript, built with `tsup`)
-- `apps/test-electron` — a minimal Electron + Vite + React demo app (two windows)
-
-The library provides a **zero-config** primitive:
-
-- `syncedAtom<T>(id, initial)` — same call-site for Main and Renderer
-  - **Main**: creates a real NanoStore atom and registers it for IPC broadcasting
-  - **Renderer**: creates an IPC-backed proxy atom that mirrors the Main store and keeps all windows in sync
+This guide is for contributors and developers working on the library itself.
 
 ---
 
-## Quick start
+## Repository Structure
 
-From repo root:
+This is a **monorepo workspace** containing:
+
+- **`packages/nanostore-ipc-bridge`** – The library (TypeScript, built with tsup)
+- **`apps/test-electron`** – Demo Electron app with two synced windows
+
+---
+
+## Quick Start (Development)
 
 ```bash
+# Install dependencies
 npm install
+
+# Run demo app (builds library + starts Electron in dev mode)
 npm run dev
 ```
 
-Expected behavior:
-- Two Electron windows open.
-- Counter and settings changes sync across both windows instantly.
+**Expected behavior:**
+
+- Two Electron windows open
+- Counter, settings, and todo list sync across both windows
+- RPC calls and events work in real-time
 
 ---
 
-## Workspace scripts
+## Workspace Commands
 
-### Root
+### Root Commands
 
 ```bash
-npm run build     # builds all workspaces
-npm run dev       # runs the demo app in dev mode
+npm run build    # Build all packages
+npm run dev      # Start demo app in dev mode
 ```
 
-### Library
+### Library Package
 
 ```bash
-npm run -w @whisperflow/nanostore-ipc-bridge build
+# Build library
+npm run -w @janhendry/nanostore-ipc-bridge build
+
+# Watch mode (for development)
+cd packages/nanostore-ipc-bridge
+npm run build -- --watch
 ```
 
-Build outputs:
-- `packages/nanostore-ipc-bridge/dist/*` (ESM + CJS + DTS)
+**Build outputs:**
 
-### Demo app
+- `packages/nanostore-ipc-bridge/dist/`
+  - ESM (`.mjs`) + CJS (`.js`) + TypeScript definitions (`.d.ts`)
+  - Separate entrypoints: `main/`, `preload/`, `universal/`, `services/`
+
+### Demo App
 
 ```bash
+# Development mode
 npm run -w @demo/test-electron dev
+
+# Production build
 npm run -w @demo/test-electron build
 ```
 
 ---
 
-## Library usage (in your app)
+## Architecture Overview
 
-### 1) Main
+See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for detailed technical documentation.
 
-1. Initialize IPC once:
-   ```ts
-   import { initNanoStoreIPC } from '@whisperflow/nanostore-ipc-bridge/main'
+### Key Concepts
 
-   initNanoStoreIPC({
-     channelPrefix: 'wf',        // optional but recommended
-     autoRegisterWindows: true,  // default true
-     allowRendererSet: true      // DX-first (can be hardened later)
-   })
-   ```
+1. **Zero-config stores**: `syncedAtom()` auto-registers when imported
+2. **Queue pattern**: Stores/services can be created before `initNanoStoreIPC()`
+3. **Revision tracking**: Prevents race conditions in multi-window sync
+4. **Services**: RPC system with explicit event broadcasting
 
-2. Ensure your shared store module is imported in Main **after** init (recommended) or anytime (works via queue):
-   ```ts
-   import '../shared/stores'
-   ```
+### Process Detection
 
-> Note: `syncedAtom()` can run before `initNanoStoreIPC()`. Stores created early are queued and registered when `initNanoStoreIPC()` is called.
+`syncedAtom()` automatically detects the runtime environment:
 
-### 2) Preload
-
-Expose the IPC API once:
-
-```ts
-import { exposeNanoStoreIPC } from '@whisperflow/nanostore-ipc-bridge/preload'
-
-exposeNanoStoreIPC({
-  channelPrefix: 'wf',
-  globalName: 'nanostoreIPC' // default is "nanostoreIPC"
-})
-```
-
-### 3) Shared store module (imported in Main and Renderer)
-
-```ts
-import { syncedAtom } from '@whisperflow/nanostore-ipc-bridge/universal'
-
-export const $counter = syncedAtom<number>('counter', 0)
-export const $settings = syncedAtom('settings', { theme: 'dark' as const, hotkey: 'Ctrl+K' })
-```
-
-### 4) Renderer
-
-Use it like a normal NanoStore (example with `@nanostores/react`):
-
-```tsx
-import { useStore } from '@nanostores/react'
-import { $settings } from '../shared/stores'
-
-export function SettingsPanel() {
-  const settings = useStore($settings)
-  return (
-    <button onClick={() => $settings.set({ ...settings, theme: settings.theme === 'dark' ? 'light' : 'dark' })}>
-      Toggle theme
-    </button>
-  )
-}
-```
+- **Main process**: `process.versions.electron` exists, no `window`
+- **Renderer process**: `window` exists + preload API available
+- **Fallback**: Outside Electron → local-only nanostore
 
 ---
 
-## Development notes
+## Development Tips
 
-### Electron process detection
+### Channel Prefix
 
-`syncedAtom()` determines runtime mode as:
-- Main: `process.versions.electron` exists and there is **no** `window`
-- Renderer: `window` exists and the preload-exposed API is present
+Always use `channelPrefix` in non-trivial apps to avoid IPC collisions:
 
-Outside Electron (tests/SSR), it falls back to a plain local NanoStore and can optionally warn.
+```typescript
+// Main
+initNanoStoreIPC({ channelPrefix: "myapp" });
 
-### Channel prefix
+// Preload
+exposeNanoStoreIPC({ channelPrefix: "myapp" });
+```
 
-For non-trivial apps, always set `channelPrefix` to avoid IPC channel collisions:
+### Production Hardening
 
-- Main: `initNanoStoreIPC({ channelPrefix: 'wf' })`
-- Preload: `exposeNanoStoreIPC({ channelPrefix: 'wf' })`
+The demo prioritizes DX. For production:
+
+- Set `allowRendererSet: false` to disable direct renderer writes
+- Use services/RPC for mutations instead of raw `.set()`
+- Validate state with schemas (e.g., Zod) before broadcasting
+- Ensure all store values are structured-clone compatible
 
 ### Cleanup
 
-The proxy store created in the renderer provides an optional `.destroy()` method that removes IPC listeners.
-Most apps do not need to call this unless you dynamically create/destroy stores at runtime.
+Renderer stores expose `.destroy()` for cleanup:
+
+```typescript
+const unsubscribe = $store.destroy(); // Removes IPC listeners
+```
+
+Rarely needed unless dynamically creating/destroying stores.
 
 ---
 
-## Hardening options (recommended for production)
+## Testing
 
-The demo is DX-first. For production you may want:
+```bash
+# Run demo app and test manually
+npm run dev
 
-- Disable direct renderer writes:
-  - Main: `allowRendererSet: false`
-  - Then mutate via explicit IPC actions (commands), not raw `set`.
-- Validate/serialize state:
-  - Ensure all store values are structured-clone-serializable.
-  - Optionally validate snapshots (e.g. zod) in main before broadcasting.
+# Check for TypeScript errors
+npm run -w @janhendry/nanostore-ipc-bridge build
+```
 
-See `ARCHITECTURE.md` for details and extension points.
+---
+
+## Contributing
+
+1. **Fork** the repository
+2. **Create a branch** for your feature/fix
+3. **Make changes** and test with the demo app
+4. **Build** the library to check for errors
+5. **Submit a PR** with a clear description
+
+### Code Style
+
+- TypeScript strict mode enabled
+- ESM + CJS dual output
+- Minimal dependencies (only `nanostores` peer)
+
+---
+
+## Release Process
+
+```bash
+# 1. Update version
+cd packages/nanostore-ipc-bridge
+npm version patch|minor|major
+
+# 2. Build
+npm run build
+
+# 3. Publish
+npm publish
+```
+
+---
+
+## License
+
+MIT

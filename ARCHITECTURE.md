@@ -124,7 +124,7 @@ Responsibilities:
 **Definition (shared file):**
 
 ```typescript
-import { defineService } from "@whisperflow/nanostore-ipc-bridge/services";
+import { defineService } from "@janhendry/nanostore-ipc-bridge/services";
 
 export const todoService = defineService("todos", {
   // RPC handlers - always execute in Main process
@@ -158,7 +158,7 @@ export const todoService = defineService("todos", {
 **Main process (auto-registration):**
 
 ```typescript
-import { initNanoStoreIPC } from "@whisperflow/nanostore-ipc-bridge/main";
+import { initNanoStoreIPC } from "@janhendry/nanostore-ipc-bridge/main";
 import "../shared/services/todoService"; // Import = auto-register!
 
 initNanoStoreIPC({ channelPrefix: "wf" });

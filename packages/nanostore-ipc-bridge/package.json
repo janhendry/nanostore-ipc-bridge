@@ -1,5 +1,5 @@
 {
-	"name": "@whisperflow/nanostore-ipc-bridge",
+	"name": "@janhendry/nanostore-ipc-bridge",
 	"version": "0.1.0",
 	"private": true,
 	"description": "Zero-config NanoStores sync across Electron windows via IPC (syncedAtom).",

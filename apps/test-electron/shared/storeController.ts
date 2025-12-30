@@ -1,4 +1,4 @@
-import { defineService } from "@whisperflow/nanostore-ipc-bridge/services";
+import { defineService } from "@janhendry/nanostore-ipc-bridge/services";
 import { $counter, $settings } from "./stores";
 
 /**

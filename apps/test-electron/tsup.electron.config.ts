@@ -11,7 +11,7 @@ export default defineConfig([
 		external: [
 			"electron",
 			"nanostores",
-			"@whisperflow/nanostore-ipc-bridge",
+			"@janhendry/nanostore-ipc-bridge",
 			"@nanostores/react",
 		],
 		noExternal: [],
@@ -29,7 +29,7 @@ export default defineConfig([
 		outDir: "dist-electron",
 		outExtension: () => ({ js: ".js" }),
 		external: ["electron"],
-		noExternal: [/@whisperflow/],
+		noExternal: [/@janhendry/],
 		platform: "node",
 		target: "node18",
 		sourcemap: false,

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { initNanoStoreIPC } from "@whisperflow/nanostore-ipc-bridge/main";
+import { initNanoStoreIPC } from "@janhendry/nanostore-ipc-bridge/main";
 import { app, BrowserWindow } from "electron";
 
 const __filename = fileURLToPath(import.meta.url);

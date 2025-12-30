@@ -1,6 +1,6 @@
-import { exposeNanoStoreIPC } from '@whisperflow/nanostore-ipc-bridge/preload'
+import { exposeNanoStoreIPC } from "@janhendry/nanostore-ipc-bridge/preload";
 
 exposeNanoStoreIPC({
-  channelPrefix: 'wf',
-  globalName: 'nanostoreIPC'
-})
+	channelPrefix: "wf",
+	globalName: "nanostoreIPC",
+});
