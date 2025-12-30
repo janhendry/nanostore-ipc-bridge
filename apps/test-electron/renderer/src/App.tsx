@@ -1,4 +1,5 @@
 import { useStore } from "@nanostores/react";
+import { storeController } from "@shared/storeController";
 import { $counter, $settings } from "@shared/stores";
 import { todoService } from "@shared/todoService";
 import React from "react";
@@ -11,10 +12,42 @@ export function App() {
 	>([]);
 	const [newTodoText, setNewTodoText] = React.useState("");
 	const [loading, setLoading] = React.useState(false);
+	const [controllerEvents, setControllerEvents] = React.useState<string[]>([]);
 
 	// Load todos on mount
 	React.useEffect(() => {
 		todoService.getTodos().then(setTodos);
+	}, []);
+
+	// Subscribe to store controller events
+	React.useEffect(() => {
+		const addEvent = (event: string) => {
+			setControllerEvents((prev) => [...prev.slice(-4), event]);
+		};
+
+		const unsubs = [
+			storeController.on("counterChanged", (data) => {
+				const d = data as { from: number; to: number; amount: number };
+				addEvent(`Counter: ${d.from} → ${d.to} (+${d.amount})`);
+			}),
+			storeController.on("counterReset", () => {
+				addEvent("Counter reset to 0");
+			}),
+			storeController.on("counterRandomized", (data) => {
+				addEvent(`Counter randomized: ${(data as any).value}`);
+			}),
+			storeController.on("themeToggled", (data) => {
+				addEvent(`Theme → ${(data as any).theme}`);
+			}),
+			storeController.on("hotkeyUpdated", (data) => {
+				addEvent(`Hotkey → ${(data as any).hotkey}`);
+			}),
+			storeController.on("bulkUpdate", () => {
+				addEvent("Bulk update executed");
+			}),
+		];
+
+		return () => unsubs.forEach((fn) => fn());
 	}, []);
 
 	// Subscribe to todo events
@@ -88,7 +121,14 @@ export function App() {
 				}}
 			>
 				<h3>Shared Counter</h3>
-				<div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+				<div
+					style={{
+						display: "flex",
+						gap: 8,
+						alignItems: "center",
+						marginBottom: 8,
+					}}
+				>
 					<button onClick={() => $counter.set(counter - 1)}>-</button>
 					<div style={{ minWidth: 60, textAlign: "center", fontSize: 18 }}>
 						{counter}
@@ -98,6 +138,51 @@ export function App() {
 						Reset
 					</button>
 				</div>
+
+				<div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+					<button
+						onClick={() => storeController.incrementCounter(5)}
+						style={{ fontSize: "12px", padding: "4px 8px" }}
+					>
+						+5 (RPC)
+					</button>
+					<button
+						onClick={() => storeController.setRandomCounter()}
+						style={{ fontSize: "12px", padding: "4px 8px" }}
+					>
+						Random (RPC)
+					</button>
+					<button
+						onClick={() => storeController.resetCounter()}
+						style={{ fontSize: "12px", padding: "4px 8px" }}
+					>
+						Reset (RPC)
+					</button>
+				</div>
+			</section>
+
+			<section
+				style={{
+					border: "1px solid #ddd",
+					borderRadius: 8,
+					padding: 12,
+					marginBottom: 12,
+				}}
+			>
+				<h3>Store Controller Events</h3>
+				{controllerEvents.length === 0 ? (
+					<p style={{ color: "#999", fontSize: "14px", margin: 0 }}>
+						No events yet. Try RPC buttons above.
+					</p>
+				) : (
+					<ul style={{ margin: 0, padding: "0 0 0 20px", fontSize: "14px" }}>
+						{controllerEvents.map((event, i) => (
+							<li key={i} style={{ marginBottom: 4 }}>
+								{event}
+							</li>
+						))}
+					</ul>
+				)}
 			</section>
 
 			<section
@@ -124,6 +209,12 @@ export function App() {
 						}
 					>
 						Toggle
+					</button>
+					<button
+						onClick={() => storeController.toggleTheme()}
+						style={{ fontSize: "12px", padding: "4px 8px" }}
+					>
+						Toggle (RPC)
 					</button>
 				</div>
 
