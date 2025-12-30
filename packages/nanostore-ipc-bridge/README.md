@@ -23,7 +23,7 @@
 npm install @janhendry/nanostore-ipc-bridge nanostores
 ```
 
-📦 **[View on npm](https://www.npmjs.com/package/@janhendry/nanostore-ipc-bridge)** | 💬 **[Report Issues](https://github.com/janhendry/nanostore-ipc-bridge/issues)** | 📖 **[Full Documentation](https://github.com/janhendry/nanostore-ipc-bridge)**
+📦 **[View on npm](https://www.npmjs.com/package/@janhendry/nanostore-ipc-bridge)** | 💬 **[Report Issues](https://github.com/janhendry/nanostore-ipc-bridge/issues)** | 📖 **[Full Documentation](https://github.com/janhendry/nanostore-ipc-bridge)** | 📝 **[Changelog](https://github.com/janhendry/nanostore-ipc-bridge/blob/main/packages/nanostore-ipc-bridge/CHANGELOG.md)**
 
 ## Quick Start
 
