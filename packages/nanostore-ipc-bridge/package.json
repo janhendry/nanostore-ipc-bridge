@@ -34,6 +34,11 @@
 			"types": "./dist/universal/index.d.ts",
 			"import": "./dist/universal/index.mjs",
 			"require": "./dist/universal/index.js"
+		},
+		"./services": {
+			"types": "./dist/universal/index.d.ts",
+			"import": "./dist/universal/index.mjs",
+			"require": "./dist/universal/index.js"
 		}
 	},
 	"peerDependencies": {

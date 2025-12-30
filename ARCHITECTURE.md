@@ -111,6 +111,154 @@ Outside Electron:
 
 - Falls back to a plain local atom (optionally warns).
 
+### 4) Services: `defineService(id, handlers)`
+
+Responsibilities:
+
+- Define RPC methods that execute in Main process
+- Type-safe remote procedure calls from Renderer
+- Event broadcasting for reactive updates across all windows
+- Automatic registration (zero-config, like `syncedAtom`)
+- Optional middleware hooks for cross-cutting concerns
+
+**Definition (shared file):**
+
+```typescript
+import { defineService } from "@whisperflow/nanostore-ipc-bridge/services";
+
+export const todoService = defineService("todos", {
+  // RPC handlers - always execute in Main process
+  addTodo: async (data: { title: string; description?: string }) => {
+    const todo = await db.todos.create(data);
+    // Manual event broadcast to all windows
+    todoService.broadcast("todoAdded", todo);
+    return todo;
+  },
+
+  deleteTodo: async (id: string) => {
+    await db.todos.delete(id);
+    todoService.broadcast("todoDeleted", id);
+  },
+
+  // Optional: Hooks for cross-cutting concerns
+  beforeAll: async (methodName, args) => {
+    // Run before any handler
+    if (!isAuthenticated()) {
+      throw new Error("Authentication required");
+    }
+  },
+
+  afterAll: async (methodName, result, duration) => {
+    // Run after any handler
+    console.log(`${methodName} completed in ${duration}ms`);
+  },
+});
+```
+
+**Main process (auto-registration):**
+
+```typescript
+import { initNanoStoreIPC } from "@whisperflow/nanostore-ipc-bridge/main";
+import "../shared/services/todoService"; // Import = auto-register!
+
+initNanoStoreIPC({ channelPrefix: "wf" });
+// todoService is now registered and ready to handle RPC calls
+```
+
+**Renderer process (type-safe RPC):**
+
+```typescript
+import { todoService } from "../shared/services/todoService";
+
+// Call RPC method - executes in Main, returns result
+const newTodo = await todoService.addTodo({
+  title: "Buy milk",
+  description: "Whole milk, 1 gallon",
+});
+
+// Listen to events broadcasted from Main
+const unsubscribe = todoService.on("todoAdded", (todo) => {
+  console.log("Todo added:", todo);
+  // Update UI reactively
+});
+
+// Cleanup
+unsubscribe();
+```
+
+**Key features:**
+
+- **Zero-config**: Import = register (same pattern as `syncedAtom`)
+- **Type-safe**: Full TypeScript inference for method signatures and event payloads
+- **Explicit events**: Manual `broadcast()` for full control over what gets published
+- **Permissive**: Renderer can call all methods by default (can be restricted later)
+- **Composable**: Services can import and call other services
+- **Middleware**: Optional `beforeAll`/`afterAll` hooks
+- **Error propagation**: Errors in Main are thrown back to Renderer
+
+**Service composition example:**
+
+```typescript
+import { notificationService } from "./notificationService";
+import { analyticsService } from "./analyticsService";
+
+export const todoService = defineService("todos", {
+  addTodo: async (data) => {
+    const todo = await db.todos.create(data);
+
+    // Services can call other services - no extra setup
+    await notificationService.show({
+      title: "Todo added",
+      body: todo.title,
+    });
+    await analyticsService.track("todo.created", { id: todo.id });
+
+    todoService.broadcast("todoAdded", todo);
+    return todo;
+  },
+});
+```
+
+**Integration with syncedAtom:**
+
+```typescript
+import { $todos } from "../stores";
+
+export const todoService = defineService("todos", {
+  addTodo: async (data) => {
+    const todo = await db.todos.create(data);
+
+    // Directly mutate synced store
+    // All renderers will receive update automatically!
+    $todos.set([...$todos.get(), todo]);
+
+    return todo;
+  },
+
+  deleteTodo: async (id) => {
+    await db.todos.delete(id);
+    $todos.set($todos.get().filter((t) => t.id !== id));
+  },
+});
+```
+
+**IPC protocol:**
+
+- `invoke(svc:call, { serviceId, method, args })` → result or error
+- `event(svc:event, { serviceId, eventName, data })` → broadcast to all windows
+
+**Error handling:**
+
+- Errors thrown in Main handlers are serialized and re-thrown in Renderer
+- Use `NanoStoreIPCError` for typed errors
+- Errors respect the global `onError` callback
+
+**Middleware execution order:**
+
+1. `beforeAll(methodName, args)` - can throw to abort
+2. Handler method (e.g., `addTodo(data)`) - main logic
+3. `afterAll(methodName, result, duration)` - always runs (even on error)
+
 ---
 
 ## Data flow
@@ -158,11 +306,18 @@ Loop prevention:
 
 If `channelPrefix = 'wf'`:
 
+**Store sync:**
+
 - `wf:ns:get` (invoke)
 - `wf:ns:set` (invoke)
 - `wf:ns:update` (event broadcast)
 
-If no prefix: `ns:get`, `ns:set`, `ns:update`.
+**Services:**
+
+- `wf:svc:call` (invoke) - RPC method calls
+- `wf:svc:event` (event broadcast) - Service events
+
+If no prefix: `ns:get`, `ns:set`, `ns:update`, `svc:call`, `svc:event`.
 
 Use a prefix in real apps to avoid collisions.
 
@@ -174,9 +329,19 @@ Use a prefix in real apps to avoid collisions.
 
 All IPC errors are typed as `NanoStoreIPCError` with the following codes:
 
+**Store errors:**
+
 - `STORE_NOT_FOUND` - Store ID not registered in main
 - `RENDERER_WRITE_DISABLED` - Renderer tried to write when `allowRendererSet=false`
 - `SERIALIZATION_FAILED` - Value not structured-clone-serializable (or validation failed)
+
+**Service errors:**
+
+- `SERVICE_NOT_FOUND` - Service ID not registered in main
+- `SERVICE_METHOD_NOT_FOUND` - Method doesn't exist on service
+
+**General errors:**
+
 - `IPC_FAILED` - IPC operation failed (network, destroyed window, etc.)
 
 Each error includes:
@@ -310,27 +475,32 @@ Implemented features:
    - Destroyed window removal
    - Complete `destroy()` implementation
 
+In progress:
+
+4. **🚧 Services / Actions**
+   - Zero-config RPC services with `defineService()`
+   - Type-safe method calls from Renderer to Main
+   - Event broadcasting for reactive updates
+   - Optional middleware hooks
+   - Service composition support
+
 Common enhancements (future work):
 
-1. **Actions / commands**
-
-   - Replace raw `set(id,value)` with `dispatch(action,args)`
-   - Enforce mutation rules centrally in main
-
-2. **Selective sync / throttling**
+1. **Selective sync / throttling**
 
    - throttle high-frequency stores (e.g., mouse position)
    - batch updates per animation frame
 
-3. **Persistence**
+2. **Persistence**
 
    - Persist store values in main (electron-store/SQLite)
    - Replay persisted values on startup before windows load
 
-4. **DevTools**
+3. **DevTools**
    - Log store updates in development
    - Provide store inspector window
    - Time-travel debugging
+   - Service call tracing
 
 ---
 

@@ -1,13 +1,19 @@
 import { app, type BrowserWindow, ipcMain } from "electron";
 import type { Store } from "nanostores";
-import { WF_NS_MAIN_API, WF_NS_QUEUE } from "../internal/symbols";
+import {
+	WF_NS_MAIN_API,
+	WF_NS_QUEUE,
+	WF_NS_SERVICE_QUEUE,
+} from "../internal/symbols";
 import type {
 	ErrorHandler,
 	MainApi,
 	NanoStoreIPCError,
+	ServiceQueueEntry,
 	Snapshot,
 } from "../internal/types";
 import { NanoStoreIPCError as IPCError } from "../internal/types";
+import { initServices } from "./services";
 
 export interface InitNanoStoreIPCOptions {
 	channelPrefix?: string;
@@ -164,17 +170,37 @@ export function initNanoStoreIPC(opts: InitNanoStoreIPCOptions = {}) {
 		log("store registered:", id);
 	};
 
+	// Initialize services
+	const serviceManager = initServices(windows, {
+		channelPrefix,
+		enableLogging,
+		onError: opts.onError,
+	});
+
 	const api: MainApi = {
 		registerStore,
 		isInitialized: () => true,
+		registerService: serviceManager.registerService,
+		broadcast: serviceManager.broadcast,
 	};
 	globalWithSymbols[WF_NS_MAIN_API] = api;
 
-	// Register queued stores (created before init)
+	// Drain the store queue: auto-register stores that were created before initNanoStoreIPC()
 	for (const [id, store] of queue.entries()) {
 		registerStore(id, store);
 	}
 	queue.clear();
+
+	// Drain the service queue: auto-register services that were created before initNanoStoreIPC()
+	const serviceQueue: Map<string, ServiceQueueEntry> =
+		(globalWithSymbols[WF_NS_SERVICE_QUEUE] as
+			| Map<string, ServiceQueueEntry>
+			| undefined) ?? new Map();
+	for (const [id, entry] of serviceQueue.entries()) {
+		api.registerService(id, entry.definition);
+		log("service registered from queue:", id);
+	}
+	serviceQueue.clear();
 
 	// IPC handlers (generic, no per-store handlers)
 	const getChannel = ch(channelPrefix, "ns:get");
@@ -328,21 +354,19 @@ export function initNanoStoreIPC(opts: InitNanoStoreIPCOptions = {}) {
 				);
 			}
 
-			// Clean up global references
+			// Destroy services
 			try {
-				const globalWithSymbols = globalThis as Record<symbol, unknown>;
-				delete globalWithSymbols[WF_NS_MAIN_API];
-				delete globalWithSymbols[WF_NS_QUEUE];
+				serviceManager.destroy();
 			} catch (err) {
-				if (enableLogging) {
-					console.warn(
-						"[nanostore-ipc] Failed to clean global references:",
+				handleError(
+					new IPCError(
+						"Failed to destroy services",
+						"IPC_FAILED",
+						undefined,
 						err,
-					);
-				}
+					),
+				);
 			}
-
-			log("destroyed");
 		},
 	};
 }
