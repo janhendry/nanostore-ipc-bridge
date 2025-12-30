@@ -1,29 +1,45 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
-import type { Store } from 'nanostores'
-import { WF_NS_QUEUE, WF_NS_MAIN_API } from '../internal/symbols'
-import type { MainApi, Snapshot } from '../internal/types'
+import { app, type BrowserWindow, ipcMain } from "electron";
+import type { Store } from "nanostores";
+import { WF_NS_MAIN_API, WF_NS_QUEUE } from "../internal/symbols";
+import type {
+	ErrorHandler,
+	MainApi,
+	NanoStoreIPCError,
+	Snapshot,
+} from "../internal/types";
+import { NanoStoreIPCError as IPCError } from "../internal/types";
 
 export interface InitNanoStoreIPCOptions {
-  channelPrefix?: string
-  enableLogging?: boolean
-  autoRegisterWindows?: boolean
-  /**
-   * If false, renderer cannot call set() (write access). Reads + updates still work.
-   * Default: true (DX-first).
-   */
-  allowRendererSet?: boolean
+	channelPrefix?: string;
+	enableLogging?: boolean;
+	autoRegisterWindows?: boolean;
+	/**
+	 * If false, renderer cannot call set() (write access). Reads + updates still work.
+	 * Default: true (DX-first).
+	 */
+	allowRendererSet?: boolean;
+	/**
+	 * Error handler called when errors occur in IPC operations.
+	 */
+	onError?: ErrorHandler;
+	/**
+	 * If true, validates that store values are serializable before broadcasting.
+	 * Recommended only for development (performance cost).
+	 * Default: false
+	 */
+	validateSerialization?: boolean;
 }
 
-type StoreEntry = {
-  store: Store<any>
-  rev: number
-  unsubscribe: () => void
-}
+type StoreEntry<T = unknown> = {
+	store: Store<T>;
+	rev: number;
+	unsubscribe: () => void;
+};
 
-type Queue = Map<string, Store<any>>
+type Queue = Map<string, Store<unknown>>;
 
 function ch(prefix: string, c: string) {
-  return prefix ? `${prefix}:${c}` : c
+	return prefix ? `${prefix}:${c}` : c;
 }
 
 /**
@@ -37,125 +53,296 @@ function ch(prefix: string, c: string) {
  * Stores can be created before init; they are kept in a global queue and registered on init.
  */
 export function initNanoStoreIPC(opts: InitNanoStoreIPCOptions = {}) {
-  const channelPrefix = opts.channelPrefix ?? ''
-  const enableLogging = opts.enableLogging ?? false
-  const autoRegisterWindows = opts.autoRegisterWindows ?? true
-  const allowRendererSet = opts.allowRendererSet ?? true
+	const channelPrefix = opts.channelPrefix ?? "";
+	const enableLogging = opts.enableLogging ?? false;
+	const autoRegisterWindows = opts.autoRegisterWindows ?? true;
+	const allowRendererSet = opts.allowRendererSet ?? true;
+	const validateSerialization = opts.validateSerialization ?? false;
 
-  const windows = new Set<BrowserWindow>()
-  const stores = new Map<string, StoreEntry>()
+	const windows = new Set<BrowserWindow>();
+	const stores = new Map<string, StoreEntry>();
 
-  const queue: Queue = (globalThis as any)[WF_NS_QUEUE] ?? new Map<string, Store<any>>()
-  ;(globalThis as any)[WF_NS_QUEUE] = queue
+	const globalWithSymbols = globalThis as Record<symbol, unknown>;
+	const queue: Queue =
+		(globalWithSymbols[WF_NS_QUEUE] as Queue | undefined) ??
+		new Map<string, Store<unknown>>();
+	globalWithSymbols[WF_NS_QUEUE] = queue;
 
-  const log = (...args: any[]) => {
-    if (enableLogging) console.log('[nanostore-ipc]', ...args)
-  }
+	const log = (...args: unknown[]) => {
+		if (enableLogging) console.log("[nanostore-ipc]", ...args);
+	};
 
-  const broadcast = (snap: Snapshot<any>) => {
-    const channel = ch(channelPrefix, 'ns:update')
-    for (const win of windows) {
-      if (win.isDestroyed()) continue
-      win.webContents.send(channel, snap)
-    }
-  }
+	const handleError = (error: NanoStoreIPCError) => {
+		if (enableLogging) {
+			console.error("[nanostore-ipc:error]", {
+				code: error.code,
+				message: error.message,
+				storeId: error.storeId,
+				originalError: error.originalError,
+			});
+		}
 
-  const registerStore = (id: string, store: Store<any>) => {
-    if (stores.has(id)) {
-      // Do not re-register (can happen if modules are imported multiple times across build boundaries)
-      return
-    }
+		if (opts.onError) {
+			try {
+				opts.onError(error);
+			} catch (error_) {
+				console.error("[nanostore-ipc] Error in error handler:", error_);
+			}
+		}
+	};
 
-    let entry: StoreEntry = {
-      store,
-      rev: 0,
-      unsubscribe: () => {}
-    }
+	const broadcast = (snap: Snapshot<unknown>) => {
+		const channel = ch(channelPrefix, "ns:update");
 
-    const unsubscribe = store.subscribe((value) => {
-      entry.rev += 1
-      broadcast({ id, rev: entry.rev, value })
-    })
+		// Clean up destroyed windows first
+		for (const win of windows) {
+			if (win.isDestroyed()) {
+				windows.delete(win);
+			}
+		}
 
-    entry.unsubscribe = unsubscribe
-    stores.set(id, entry)
+		// Then broadcast
+		for (const win of windows) {
+			try {
+				win.webContents.send(channel, snap);
+			} catch (err) {
+				handleError(
+					new IPCError(
+						`Failed to broadcast update for store "${snap.id}"`,
+						"IPC_FAILED",
+						snap.id,
+						err,
+					),
+				);
+				// Window might have closed during send - remove it
+				windows.delete(win);
+			}
+		}
 
-    log('store registered:', id)
-  }
+		log("broadcast:", snap.id, `(${windows.size} windows)`);
+	};
 
-  const api: MainApi = {
-    registerStore,
-    isInitialized: () => true
-  }
-  ;(globalThis as any)[WF_NS_MAIN_API] = api
+	const registerStore = <T = unknown>(id: string, store: Store<T>) => {
+		if (stores.has(id)) {
+			log("store already registered, skipping:", id);
+			return;
+		}
 
-  // Register queued stores (created before init)
-  for (const [id, store] of queue.entries()) {
-    registerStore(id, store)
-  }
-  queue.clear()
+		const entry: StoreEntry<T> = {
+			store,
+			rev: 0,
+			unsubscribe: () => {},
+		};
 
-  // IPC handlers (generic, no per-store handlers)
-  const getChannel = ch(channelPrefix, 'ns:get')
-  const setChannel = ch(channelPrefix, 'ns:set')
+		const unsubscribe = store.subscribe((value) => {
+			entry.rev += 1;
+			const snap: Snapshot<T> = { id, rev: entry.rev, value };
 
-  if (ipcMain.listenerCount(getChannel) === 0) {
-    ipcMain.handle(getChannel, (_e, id: string) => {
-      const entry = stores.get(id)
-      if (!entry) throw new Error(`Store not found: ${id}`)
-      return { id, rev: entry.rev, value: entry.store.get() } satisfies Snapshot<any>
-    })
-  }
+			// Optional: Serialization validation
+			if (validateSerialization) {
+				try {
+					structuredClone(value);
+				} catch (err) {
+					handleError(
+						new IPCError(
+							`Store value not serializable: ${id}`,
+							"SERIALIZATION_FAILED",
+							id,
+							err,
+						),
+					);
+					return; // Don't broadcast invalid values
+				}
+			}
 
-  if (ipcMain.listenerCount(setChannel) === 0) {
-    ipcMain.handle(setChannel, (_e, id: string, value: any) => {
-      if (!allowRendererSet) {
-        throw new Error('Renderer writes are disabled for syncedAtom (allowRendererSet=false).')
-      }
-      const entry = stores.get(id)
-      if (!entry) throw new Error(`Store not found: ${id}`)
-      // This will trigger broadcast via subscribe()
-      ;(entry.store as any).set?.(value)
-    })
-  }
+			broadcast(snap);
+		});
 
-  const registerWindow = (win: BrowserWindow) => {
-    if (windows.has(win)) return
-    windows.add(win)
+		entry.unsubscribe = unsubscribe;
+		stores.set(id, entry);
 
-    win.on('closed', () => windows.delete(win))
+		log("store registered:", id);
+	};
 
-    // Push snapshots on load (helps new windows)
-    win.webContents.on('did-finish-load', () => {
-      for (const [id, entry] of stores.entries()) {
-        const snap: Snapshot<any> = { id, rev: entry.rev, value: entry.store.get() }
-        if (!win.isDestroyed()) win.webContents.send(ch(channelPrefix, 'ns:update'), snap)
-      }
-    })
+	const api: MainApi = {
+		registerStore,
+		isInitialized: () => true,
+	};
+	globalWithSymbols[WF_NS_MAIN_API] = api;
 
-    log('window registered')
-  }
+	// Register queued stores (created before init)
+	for (const [id, store] of queue.entries()) {
+		registerStore(id, store);
+	}
+	queue.clear();
 
-  if (autoRegisterWindows) {
-    app.on('browser-window-created', (_event, win) => {
-      registerWindow(win)
-    })
-  }
+	// IPC handlers (generic, no per-store handlers)
+	const getChannel = ch(channelPrefix, "ns:get");
+	const setChannel = ch(channelPrefix, "ns:set");
 
-  log('IPC initialized', { channelPrefix, autoRegisterWindows, allowRendererSet })
+	if (ipcMain.listenerCount(getChannel) === 0) {
+		ipcMain.handle(getChannel, (_e, id: string) => {
+			const entry = stores.get(id);
+			if (!entry) {
+				const err = new IPCError(
+					`Store not found: ${id}`,
+					"STORE_NOT_FOUND",
+					id,
+				);
+				handleError(err);
+				throw err;
+			}
+			return {
+				id,
+				rev: entry.rev,
+				value: entry.store.get(),
+			} satisfies Snapshot<unknown>;
+		});
+	}
 
-  return {
-    registerStore,
-    registerWindow,
-    destroy: () => {
-      for (const entry of stores.values()) {
-        try { entry.unsubscribe() } catch {}
-      }
-      stores.clear()
-      windows.clear()
-      ipcMain.removeHandler(getChannel)
-      ipcMain.removeHandler(setChannel)
-      log('destroyed')
-    }
-  }
+	if (ipcMain.listenerCount(setChannel) === 0) {
+		ipcMain.handle(setChannel, (_e, id: string, value: unknown) => {
+			if (!allowRendererSet) {
+				const err = new IPCError(
+					"Renderer writes are disabled (allowRendererSet=false)",
+					"RENDERER_WRITE_DISABLED",
+					id,
+				);
+				handleError(err);
+				throw err;
+			}
+
+			const entry = stores.get(id);
+			if (!entry) {
+				const err = new IPCError(
+					`Store not found: ${id}`,
+					"STORE_NOT_FOUND",
+					id,
+				);
+				handleError(err);
+				throw err;
+			}
+
+			// Type-safe set with existence check
+			const store = entry.store as { set?: (val: unknown) => void };
+			if (typeof store.set === "function") {
+				store.set(value);
+			}
+		});
+	}
+
+	const registerWindow = (win: BrowserWindow) => {
+		if (windows.has(win)) return;
+		windows.add(win);
+
+		// Cleanup on close
+		const onClosed = () => {
+			windows.delete(win);
+			log("window unregistered:", win.id);
+		};
+		win.once("closed", onClosed);
+
+		// Push snapshots only once per load
+		const pushSnapshots = () => {
+			if (win.isDestroyed()) return;
+
+			log("pushing snapshots to window:", win.id);
+			for (const [id, entry] of stores.entries()) {
+				const snap: Snapshot<unknown> = {
+					id,
+					rev: entry.rev,
+					value: entry.store.get(),
+				};
+				try {
+					win.webContents.send(ch(channelPrefix, "ns:update"), snap);
+				} catch (err) {
+					handleError(
+						new IPCError(
+							`Failed to push snapshot for store "${id}"`,
+							"IPC_FAILED",
+							id,
+							err,
+						),
+					);
+				}
+			}
+		};
+
+		// Use once() instead of on() to prevent memory leak
+		win.webContents.once("did-finish-load", pushSnapshots);
+
+		log("window registered:", win.id);
+	};
+
+	if (autoRegisterWindows) {
+		app.on("browser-window-created", (_event, win) => {
+			registerWindow(win);
+		});
+	}
+
+	log("IPC initialized", {
+		channelPrefix,
+		autoRegisterWindows,
+		allowRendererSet,
+	});
+
+	return {
+		registerStore,
+		registerWindow,
+		destroy: () => {
+			log("destroying IPC bridge...");
+
+			// Unsubscribe all stores
+			for (const [id, entry] of stores.entries()) {
+				try {
+					entry.unsubscribe();
+					log("unsubscribed store:", id);
+				} catch (err) {
+					handleError(
+						new IPCError(
+							`Failed to unsubscribe store "${id}"`,
+							"IPC_FAILED",
+							id,
+							err,
+						),
+					);
+				}
+			}
+
+			// Clear collections
+			stores.clear();
+			windows.clear();
+
+			// Remove IPC handlers
+			try {
+				ipcMain.removeHandler(getChannel);
+				ipcMain.removeHandler(setChannel);
+			} catch (err) {
+				handleError(
+					new IPCError(
+						"Failed to remove IPC handlers",
+						"IPC_FAILED",
+						undefined,
+						err,
+					),
+				);
+			}
+
+			// Clean up global references
+			try {
+				const globalWithSymbols = globalThis as Record<symbol, unknown>;
+				delete globalWithSymbols[WF_NS_MAIN_API];
+				delete globalWithSymbols[WF_NS_QUEUE];
+			} catch (err) {
+				if (enableLogging) {
+					console.warn(
+						"[nanostore-ipc] Failed to clean global references:",
+						err,
+					);
+				}
+			}
+
+			log("destroyed");
+		},
+	};
 }
