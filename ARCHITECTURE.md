@@ -79,8 +79,23 @@ Responsibilities:
   - `set(id, value)`
   - `subscribe(id, cb)`
   - `subscribeAll(cb)`
+  - `callService(serviceId, method, ...args)`
+  - `subscribeServiceEvent(serviceId, eventName, cb)`
+- **Security**: Validates all IPC inputs at the preload boundary
+  - ID validation (type, length, format)
+  - Value validation (serializability, prototype pollution protection)
+  - Callback type checking
+  - Prevents dangerous object structures
 
 The API is exposed under `window.nanostoreIPC` by default (configurable).
+
+**Security features:**
+
+- Rejects non-string IDs or IDs exceeding 256 characters
+- Validates values are structured-clone-serializable
+- Prevents prototype pollution via `__proto__`, `constructor`, or `prototype` manipulation
+- Rejects class instances (except Date, RegExp, Error)
+- Validates callbacks are functions
 
 ### 3) Universal: `syncedAtom(id, initial, options?)`
 
@@ -111,7 +126,7 @@ Outside Electron:
 
 - Falls back to a plain local atom (optionally warns).
 
-### 4) Services: `defineService(id, handlers)`
+### 4) Services: `defineService(options)`
 
 Responsibilities:
 
@@ -126,7 +141,9 @@ Responsibilities:
 ```typescript
 import { defineService } from "@janhendry/nanostore-ipc-bridge/services";
 
-export const todoService = defineService("todos", {
+export const todoService = defineService({
+  id: "todos",
+  handlers: {
   // RPC handlers - always execute in Main process
   addTodo: async (data: { title: string; description?: string }) => {
     const todo = await db.todos.create(data);
@@ -202,7 +219,9 @@ unsubscribe();
 import { notificationService } from "./notificationService";
 import { analyticsService } from "./analyticsService";
 
-export const todoService = defineService("todos", {
+export const todoService = defineService({
+  id: "todos",
+  handlers: {
   addTodo: async (data) => {
     const todo = await db.todos.create(data);
 
@@ -224,7 +243,9 @@ export const todoService = defineService("todos", {
 ```typescript
 import { $todos } from "../stores";
 
-export const todoService = defineService("todos", {
+export const todoService = defineService({
+  id: "todos",
+  handlers: {
   addTodo: async (data) => {
     const todo = await db.todos.create(data);
 
@@ -340,6 +361,10 @@ All IPC errors are typed as `NanoStoreIPCError` with the following codes:
 - `SERVICE_NOT_FOUND` - Service ID not registered in main
 - `SERVICE_METHOD_NOT_FOUND` - Method doesn't exist on service
 
+**Initialization errors:**
+
+- `ALREADY_INITIALIZED` - `initNanoStoreIPC()` called more than once
+
 **General errors:**
 
 - `IPC_FAILED` - IPC operation failed (network, destroyed window, etc.)
@@ -397,7 +422,7 @@ Each error includes:
      { name: "" },
      {
        validateValue: (val) => schema.safeParse(val).success,
-     }
+     },
    );
    ```
 
@@ -407,17 +432,37 @@ Each error includes:
 
 ### Serialization
 
-IPC payloads must be structured-clone-serializable. Avoid:
+IPC payloads must be structured-clone-serializable. The preload layer automatically validates inputs to prevent:
 
-- class instances, functions
+- Functions, symbols, undefined
+- Class instances (except Date, RegExp, Error which are structured-cloneable)
+- Prototype pollution attempts (`__proto__`, `constructor`, `prototype` manipulation)
+- Non-serializable values
+
+**Rejected values:**
+
+- class instances, functions, symbols
 - `Map`, `Set` (unless you convert to arrays)
 - DOM objects, Electron objects
+- Objects with modified prototypes (except whitelisted types)
 
-Recommended: plain objects, arrays, numbers, strings, booleans.
+**Accepted values:**
+
+- Plain objects, arrays, numbers, strings, booleans, null
+- Date, RegExp, Error instances
+
+The validation layer throws `TypeError` on invalid inputs, preventing them from reaching the main process.
 
 ### Single instance / single main process
 
 This design targets one Electron app instance with one main process controlling windows.
+
+**Singleton enforcement:**
+
+- `initNanoStoreIPC()` can only be called once per app lifecycle
+- Calling it multiple times throws `ALREADY_INITIALIZED` error
+- This prevents duplicate IPC handler registration and state conflicts
+
 If you run multiple app instances concurrently, you need a shared persistence layer (DB/file locks).
 
 ### Store discovery
@@ -431,26 +476,39 @@ If you run multiple app instances concurrently, you need a shared persistence la
 
 ## Security model
 
-DX-first defaults:
+**Built-in security features:**
 
-- `allowRendererSet: true` enables direct writes from renderer.
-- No runtime validation by default (performance).
+- ✅ **Input validation**: All IPC inputs validated at preload boundary
+- ✅ **Prototype pollution protection**: Rejects dangerous object structures
+- ✅ **Serialization checks**: Only structured-cloneable values accepted
+- ✅ **ID validation**: Enforces string IDs with length limits (max 256 chars)
+- ✅ **Type safety**: Full TypeScript coverage prevents runtime errors
+- ✅ **Singleton enforcement**: Prevents multiple initialization and handler conflicts
+- ✅ **Update batching**: Mitigates high-frequency update spam (automatic via microtask queue)
 
-For stricter production posture:
+**DX-first defaults:**
 
-- Set `allowRendererSet: false`
-- Expose only actions/commands (explicit IPC endpoints) for mutations
+- `allowRendererSet: true` enables direct writes from renderer
+- No additional runtime validation by default (validation at preload is sufficient)
+
+**For stricter production posture:**
+
+- Set `allowRendererSet: false` to disable renderer writes entirely
+- Expose only actions/commands (explicit IPC endpoints via services) for mutations
 - Validate inputs on main side using `validateSerialization: true` or per-store `validateValue`
 - Consider read-only renderer stores (`syncedAtom(..., { rendererCanSet: false })`)
 - Implement error tracking via `onError` callback
 - Use schema validation (e.g., Zod) for critical stores
 
-Threat considerations:
+**Threat considerations:**
 
-- Renderer is less trusted. Treat incoming values as untrusted input.
-- Keep preload API surface small (this design does).
-- All errors include store IDs - be careful not to leak sensitive info in error messages.
-- `validateSerialization` has performance cost - use sparingly in production.
+- ✅ **Mitigated**: Prototype pollution (validated at preload)
+- ✅ **Mitigated**: Non-serializable values (validated at preload)
+- ✅ **Mitigated**: IPC spam (update batching via microtask queue)
+- ✅ **Mitigated**: Multiple initialization (singleton enforcement)
+- ⚠️ **Consider**: Renderer is less trusted - validate business logic constraints on main side
+- ⚠️ **Consider**: Error messages may expose store structure - sanitize in production if needed
+- ⚠️ **Consider**: Rate limiting for service calls (not yet implemented)
 
 ---
 
@@ -459,15 +517,15 @@ Threat considerations:
 Implemented features:
 
 1. **✅ Error handling**
-
    - Custom `NanoStoreIPCError` with typed error codes
    - Error callbacks for tracking and logging
    - Structured error propagation
 
 2. **✅ Value validation**
-
-   - Optional `validateValue` per store
-   - Optional `validateSerialization` in main
+   - Automatic input validation at preload boundary
+   - Optional `validateValue` per store for business logic
+   - Optional `validateSerialization` in main for runtime checks
+   - Prototype pollution protection
    - Ready for schema validators (Zod, Yup, etc.)
 
 3. **✅ Memory leak prevention**
@@ -475,32 +533,43 @@ Implemented features:
    - Destroyed window removal
    - Complete `destroy()` implementation
 
-In progress:
+4. **✅ Performance optimization**
+   - Automatic update batching via microtask queue
+   - Reduces IPC overhead for high-frequency updates
+   - Batches multiple store updates into single broadcast round
 
-4. **🚧 Services / Actions**
+5. **✅ Services / Actions**
    - Zero-config RPC services with `defineService()`
    - Type-safe method calls from Renderer to Main
    - Event broadcasting for reactive updates
    - Optional middleware hooks
    - Service composition support
 
-Common enhancements (future work):
+Future enhancements:
 
-1. **Selective sync / throttling**
+1. **Rate limiting**
+   - Per-window rate limiting for service calls
+   - Configurable thresholds
+   - DOS protection
 
-   - throttle high-frequency stores (e.g., mouse position)
-   - batch updates per animation frame
+2. **Selective sync**
+   - Track which stores each window subscribes to
+   - Only broadcast to interested windows
+   - Additional throttling options for high-frequency stores
 
-2. **Persistence**
-
+3. **Persistence**
    - Persist store values in main (electron-store/SQLite)
    - Replay persisted values on startup before windows load
 
-3. **DevTools**
+4. **DevTools**
    - Log store updates in development
    - Provide store inspector window
    - Time-travel debugging
    - Service call tracing
+
+5. **Computed store support**
+   - Add `syncedComputed()` for derived values
+   - Efficient synchronization of computed stores
 
 ---
 

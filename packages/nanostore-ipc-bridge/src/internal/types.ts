@@ -22,7 +22,8 @@ export class NanoStoreIPCError extends Error {
 			| "SERIALIZATION_FAILED"
 			| "IPC_FAILED"
 			| "SERVICE_NOT_FOUND"
-			| "SERVICE_METHOD_NOT_FOUND",
+			| "SERVICE_METHOD_NOT_FOUND"
+			| "ALREADY_INITIALIZED",
 		public storeId?: string,
 		public originalError?: unknown,
 	) {

@@ -48,6 +48,8 @@ function ch(prefix: string, c: string) {
 	return prefix ? `${prefix}:${c}` : c;
 }
 
+let instanceCreated = false;
+
 /**
  * Initializes a minimal IPC surface:
  * - invoke: ns:get(id) -> {id,rev,value}
@@ -59,6 +61,14 @@ function ch(prefix: string, c: string) {
  * Stores can be created before init; they are kept in a global queue and registered on init.
  */
 export function initNanoStoreIPC(opts: InitNanoStoreIPCOptions = {}) {
+	if (instanceCreated) {
+		throw new IPCError(
+			"initNanoStoreIPC() has already been called. Multiple initializations are not allowed.",
+			"ALREADY_INITIALIZED",
+		);
+	}
+	instanceCreated = true;
+
 	const channelPrefix = opts.channelPrefix ?? "";
 	const enableLogging = opts.enableLogging ?? false;
 	const autoRegisterWindows = opts.autoRegisterWindows ?? true;
@@ -77,6 +87,10 @@ export function initNanoStoreIPC(opts: InitNanoStoreIPCOptions = {}) {
 	const log = (...args: unknown[]) => {
 		if (enableLogging) console.log("[nanostore-ipc]", ...args);
 	};
+
+	// Batching state
+	const pendingBroadcasts = new Map<string, Snapshot<unknown>>();
+	let broadcastScheduled = false;
 
 	const handleError = (error: NanoStoreIPCError) => {
 		if (enableLogging) {
@@ -97,7 +111,7 @@ export function initNanoStoreIPC(opts: InitNanoStoreIPCOptions = {}) {
 		}
 	};
 
-	const broadcast = (snap: Snapshot<unknown>) => {
+	const broadcastPending = () => {
 		const channel = ch(channelPrefix, "ns:update");
 
 		// Clean up destroyed windows first
@@ -107,25 +121,40 @@ export function initNanoStoreIPC(opts: InitNanoStoreIPCOptions = {}) {
 			}
 		}
 
-		// Then broadcast
-		for (const win of windows) {
-			try {
-				win.webContents.send(channel, snap);
-			} catch (err) {
-				handleError(
-					new IPCError(
-						`Failed to broadcast update for store "${snap.id}"`,
-						"IPC_FAILED",
-						snap.id,
-						err,
-					),
-				);
-				// Window might have closed during send - remove it
-				windows.delete(win);
+		// Broadcast all pending updates
+		for (const snap of pendingBroadcasts.values()) {
+			for (const win of windows) {
+				try {
+					win.webContents.send(channel, snap);
+				} catch (err) {
+					handleError(
+						new IPCError(
+							`Failed to broadcast update for store "${snap.id}"`,
+							"IPC_FAILED",
+							snap.id,
+							err,
+						),
+					);
+					// Window might have closed during send - remove it
+					windows.delete(win);
+				}
 			}
+			log("broadcast:", snap.id, `(${windows.size} windows)`);
 		}
 
-		log("broadcast:", snap.id, `(${windows.size} windows)`);
+		pendingBroadcasts.clear();
+		broadcastScheduled = false;
+	};
+
+	const broadcast = (snap: Snapshot<unknown>) => {
+		// Add to batch
+		pendingBroadcasts.set(snap.id, snap);
+
+		// Schedule broadcast if not already scheduled
+		if (!broadcastScheduled) {
+			broadcastScheduled = true;
+			queueMicrotask(broadcastPending);
+		}
 	};
 
 	const registerStore = <T = unknown>(id: string, store: Store<T>) => {

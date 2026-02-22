@@ -6,7 +6,7 @@
 		"apps/*"
 	],
 	"scripts": {
-		"build": "npm run -ws build",
-		"dev": "npm run -w @demo/test-electron dev"
+		"build": "bun run --filter '*' build",
+		"dev": "bun run --filter @demo/test-electron dev"
 	}
 }

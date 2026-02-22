@@ -4,12 +4,12 @@
 	"version": "0.0.0",
 	"type": "module",
 	"scripts": {
-		"build": "npm run -w @janhendry/nanostore-ipc-bridge build && tsup --config tsup.electron.config.ts && vite build",
-		"dev": "npm run -w @janhendry/nanostore-ipc-bridge build && concurrently -k \"vite\" \"tsup --config tsup.electron.config.ts --watch\" \"wait-on http://localhost:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron dist-electron/main.js\""
+		"build": "bun run --filter @janhendry/nanostore-ipc-bridge build && tsup --config tsup.electron.config.ts && vite build",
+		"dev": "bun run --filter @janhendry/nanostore-ipc-bridge build && concurrently -k \"vite\" \"tsup --config tsup.electron.config.ts --watch\" \"wait-on http://localhost:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron dist-electron/main.js\""
 	},
 	"dependencies": {
 		"@janhendry/nanostore-ipc-bridge": "*",
-		"nanostores": "^0.11.3",
+		"nanostores": "^1.1.0",
 		"@nanostores/react": "^0.8.3",
 		"react": "^18.3.1",
 		"react-dom": "^18.3.1"

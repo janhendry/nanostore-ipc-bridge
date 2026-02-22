@@ -109,8 +109,8 @@ export function syncedAtom<T>(
 	// RENDERER: IPC-backed proxy store (if IPC is available)
 	const ipc = getRendererIPC(globalName);
 
-	type AtomWithDestroy<T> = WritableAtom<T> & { destroy?: () => void };
-	const $local: AtomWithDestroy<T> = atom<T>(initial);
+	type AtomWithDestroy<T> = WritableAtom<T> & { destroy: () => void };
+	const $local = atom<T>(initial) as AtomWithDestroy<T>;
 
 	if (!ipc) {
 		if (options.warnIfNoIPC) {
